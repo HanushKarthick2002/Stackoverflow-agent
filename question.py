@@ -113,8 +113,15 @@ def stream_llm_response(question, answers):
             {
                 "role": "user",
                 "content": f"""
-            You are an expert in simplifying technical content while maintaining its accuracy and meaning. Given a technical question and multiple extracted answers from Stack Overflow, your task is to present a well-structured and easy-to-understand answer.
+            You are an expert in simplifying technical content while maintaining accuracy. Given a technical question and three extracted answers from Stack Overflow, your task is to combine and present them in a clear, easy-to-understand manner without altering their core meaning.
 
+Instructions:
+
+Summarize key insights from all three answers into a single, well-structured response.
+Ensure clarity by avoiding unnecessary jargon while preserving technical accuracy.
+If the answers contain code, format it neatly and add brief explanations if needed.
+If multiple solutions exist, present them logically and indicate any differences or trade-offs.
+Keep the response concise but informative, ensuring completeness.
             **Input:**
             Question: {question}
             Extracted Answers: 
