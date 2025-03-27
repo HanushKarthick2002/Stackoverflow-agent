@@ -2,7 +2,7 @@ import subprocess
 import sys
 
 # Install required packages if missing
-required_packages = ["requests", "beautifulsoup4", "rich"]
+required_packages = ["requests", "beautifulsoup4", "rich","urllib3"]
 
 def install_missing_packages():
     for package in required_packages:
