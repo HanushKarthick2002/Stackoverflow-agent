@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StackOverflow Agent</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <h1>StackOverflow Agent</h1>
+    
+    <div class="container">
+        <textarea id="questionInput" placeholder="Enter your question..."></textarea>
+        <button onclick="askQuestion()">Get Answer</button>
+        
+        <div class="status" id="status">Waiting for input...</div>
+        
+        <div class="response-box" id="response">
+            <strong>LLM Response:</strong>
+            <p id="llmOutput">No response yet.</p>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+
+</body>
+</html>
