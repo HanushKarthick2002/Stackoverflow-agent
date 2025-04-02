@@ -3,8 +3,12 @@ let LLMFOUNDRY_TOKEN = null;
 async function fetchLLMToken() {
     try {
         const response = await fetch("https://llmfoundry.straive.com/token", { credentials: "include" });
+        if (!response.ok) {
+            throw new Error(`Failed to fetch token: ${response.status}`);
+        }
         const data = await response.json();
         LLMFOUNDRY_TOKEN = data.token;
+
     } catch (error) {
         console.error("Error fetching LLM token:", error);
         LLMFOUNDRY_TOKEN = null;
@@ -14,6 +18,69 @@ async function fetchLLMToken() {
 // Fetch the token on page load
 fetchLLMToken();
 
+function showNotification(message, type = "info") {
+    // Remove any existing alert
+    const existingAlert = document.querySelector(".alert");
+    if (existingAlert) {
+        existingAlert.remove();
+    }
+
+    // Create a Bootstrap alert
+    const notification = document.createElement("div");
+    notification.className = `alert alert-${type} alert-dismissible fade show`;
+    notification.role = "alert";
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+
+    // Append the alert to the body or a specific container
+    document.body.appendChild(notification);
+
+    // Automatically remove the alert after 4 seconds
+    setTimeout(() => {
+        notification.remove();
+    }, 4000);
+}
+
+function showLoginPopup() {
+    // Remove any existing modal
+    const existingModal = document.querySelector("#loginModal");
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Create a Bootstrap modal
+    const modal = document.createElement("div");
+    modal.id = "loginModal";
+    modal.className = "modal fade";
+    modal.tabIndex = "-1";
+    modal.role = "dialog";
+    modal.innerHTML = `
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Login Required</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Please sign in to LLM Foundry first.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="window.location.href='https://llmfoundry.straive.com/login'">Login</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Append the modal to the body
+    document.body.appendChild(modal);
+
+    // Show the modal using Bootstrap's JavaScript API
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
+}
 
 async function askQuestion() {
     const question = document.getElementById("questionInput").value.trim();
@@ -21,12 +88,12 @@ async function askQuestion() {
     const statusDiv = document.getElementById("status");
 
     if (!question) {
-        alert("Please enter a question.");
+        showNotification("Please enter a question.", "warning");
         return;
     }
 
     if (!LLMFOUNDRY_TOKEN) {
-        alert("Please sign in to LLM Foundry first.");
+        showLoginPopup();
         return;
     }
 
@@ -37,17 +104,18 @@ async function askQuestion() {
         const stackOverflowAnswers = await fetchStackOverflowAnswers(question);
         
         if (!stackOverflowAnswers.length) {
-            responseDiv.innerHTML = "⚠️ No relevant answers found on Stack Overflow.";
+            showNotification("⚠️ No relevant answers found on Stack Overflow.", "warning");
             return;
         }
 
         statusDiv.innerText = "Processing answers with LLM...";
         await fetchLLMResponse(question, stackOverflowAnswers);
     } catch (error) {
-        responseDiv.innerHTML = "⚠️ Error: Could not fetch response.";
+        showNotification("Error: Could not fetch response.", "error");
         console.error(error);
     }
 }
+
 async function fetchStackOverflowAnswers(question) {
     const searchUrl = `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(question)}&site=stackoverflow&accepted=True&filter=withbody`;
     
@@ -56,14 +124,14 @@ async function fetchStackOverflowAnswers(question) {
         const searchData = await searchResponse.json();
 
         if (!searchData.items || searchData.items.length === 0) {
-            console.log("No relevant solutions found on Stack Overflow.");
+            showNotification("No relevant solutions found on Stack Overflow.", "info");
             return [];
         }
 
         const questionIds = searchData.items.slice(0, 5).map(item => item.question_id);
         return await getTopAnswers(questionIds);
     } catch (error) {
-        console.error("Error fetching Stack Overflow questions:", error);
+        showNotification("Error fetching Stack Overflow questions.", "error");
         return [];
     }
 }
@@ -88,25 +156,62 @@ async function getTopAnswers(questionIds) {
                 }
             }
         } catch (error) {
-            console.error(`Error fetching answers for question ID ${qid}:`, error);
+            showNotification(`Error fetching answers for question ID ${qid}.`, "error");
         }
-    }
-    
-    // Sort all answers by score in descending order and return the top 3
+    }    
     return allAnswers.sort((a, b) => b.score - a.score).slice(0, 3);
 }
 
+// Define the asyncLLM function
+async function* asyncLLM(apiUrl, options) {
+    const response = await fetch(apiUrl, options);
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let done = false;
+    let buffer = ""; // Buffer to accumulate incomplete JSON chunks
+
+    while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk; // Append the chunk to the buffer
+
+        const lines = buffer.split("\n").filter(line => line.trim() !== "");
+        buffer = ""; // Clear the buffer to process lines
+
+        for (const line of lines) {
+            if (line === "data: [DONE]") {
+                // End of the stream, stop processing
+                return;
+            }
+
+            if (line.startsWith("data: ")) {
+                const jsonString = line.slice(6); // Remove the "data: " prefix
+                try {
+                    yield JSON.parse(jsonString);
+                } catch (error) {
+                    // If JSON parsing fails, re-add the line to the buffer for the next iteration
+                    buffer += line + "\n";
+                }
+            }
+        }
+    }
+}
 
 async function fetchLLMResponse(question, answers) {
     const responseDiv = document.getElementById("llmOutput");
     const statusDiv = document.getElementById("status");
     
     statusDiv.innerText = "Generating final response...";
-    responseDiv.innerHTML = ""; // Clear previous response
+    responseDiv.innerHTML = "";
 
     const formattedAnswers = answers.map((ans, i) => 
-        `🔹 **Answer ${i + 1}** (Votes: ${ans.score})\n${ans.text}\n`
-    ).join("\n");
+        `🔹 <strong>Answer ${i + 1}</strong> (Votes: ${ans.score})<br>${ans.text}<br>`
+    ).join("<br>");
 
     const payload = {
         model: "gpt-4o-mini",
@@ -126,53 +231,40 @@ async function fetchLLMResponse(question, answers) {
                 Question: ${question}  
                 Extracted Answers:  
                 ${formattedAnswers}`
-                
             }
         ],
         stream: true
     };
 
-    const response = await fetch("https://llmfoundry.straive.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LLMFOUNDRY_TOKEN}:my-test-project` },
-        credentials: "include",
-        body: JSON.stringify(payload)
-    });
+    try {
+        let currentChunk = "";
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+        for await (const data of asyncLLM("https://llmfoundry.straive.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${LLMFOUNDRY_TOKEN}:my-test-project`
+            },
+            credentials: "include",
+            body: JSON.stringify(payload),
+        })) {
+            if (data.error) {
+                console.error("API Error:", data.error);
+                throw new Error(data.error.message || "LLM API Error");
+            }
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+            if (data.choices && data.choices[0].delta.content) {
+                const content = data.choices[0].delta.content;
+                currentChunk += content;
 
-        const chunk = decoder.decode(value);
-        buffer += chunk;
-
-        const dataLines = buffer.split("\n");
-        buffer = dataLines.pop(); 
-
-        for (let line of dataLines) {
-            line = line.trim();
-            if (!line || line === "data: [DONE]") continue;
-
-            if (line.startsWith("data: ")) {
-                const jsonStr = line.slice(6).trim();
-
-                try {
-                    const jsonChunk = JSON.parse(jsonStr);
-                    const contentPiece = jsonChunk.choices?.[0]?.delta?.content || "";
-
-                    if (contentPiece) {
-                        responseDiv.innerHTML += contentPiece.replace(/\n/g, "<br>"); // Ensures line breaks
-                    }
-                } catch (error) {
-                    console.error("Error processing LLM stream:", error, "Raw data:", jsonStr);
-                }
+                // Append content to the responseDiv
+                responseDiv.innerHTML += content.replace(/\n/g, "<br>");
             }
         }
-    }
 
-    statusDiv.innerText = "✅ Response received.";
+        statusDiv.innerText = "✅ Response received.";
+    } catch (error) {
+        showNotification("Error processing LLM response.", "error");
+        console.error(error);
+    }
 }
